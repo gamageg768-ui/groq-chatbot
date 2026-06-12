@@ -118,6 +118,57 @@
   @apply border-gray-200 my-4;
 }
 
+/* Dark mode overrides */
+.dark body {
+  background-color: #111827;
+  color: #f3f4f6;
+}
+
+.dark .prose-chat {
+  color: #e5e7eb;
+}
+
+.dark .prose-chat h1,
+.dark .prose-chat h2,
+.dark .prose-chat h3 {
+  color: #f9fafb;
+}
+
+.dark .prose-chat p { color: inherit; }
+
+.dark .prose-chat code {
+  background-color: #374151;
+  color: #a5b4fc;
+}
+
+.dark .prose-chat blockquote {
+  border-color: #6366f1;
+  color: #9ca3af;
+}
+
+.dark .prose-chat th {
+  background-color: #1f2937;
+  border-color: #374151;
+  color: #e5e7eb;
+}
+
+.dark .prose-chat td {
+  border-color: #374151;
+  color: #9ca3af;
+}
+
+.dark .prose-chat hr {
+  border-color: #374151;
+}
+
+.dark .prose-chat a {
+  color: #818cf8;
+}
+
+.dark .scrollbar-thin {
+  scrollbar-color: #374151 transparent;
+}
+
 /* Typing cursor */
 .typing-cursor::after {
   content: '▋';

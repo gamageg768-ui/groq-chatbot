@@ -63,4 +63,12 @@ export interface AppSettings {
   maxTokens: number;
   systemPrompt: string;
   streamingEnabled: boolean;
+  language: string;
+  darkMode: boolean;
+}
+
+export interface PromptItem {
+  id: string;
+  name: string;
+  prompt: string;
 }

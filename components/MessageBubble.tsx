@@ -27,8 +27,8 @@ function CodeBlock({ children, className }: { children: string; className?: stri
   };
 
   return (
-    <div className="relative my-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm">
-      <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
+    <div className="relative my-3 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-600 shadow-sm">
+      <div className="flex items-center justify-between bg-gray-800 dark:bg-gray-900 px-4 py-2">
         <span className="text-xs text-gray-400 font-mono font-medium">{language}</span>
         <button
           onClick={handleCopy}
@@ -88,9 +88,7 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
   };
 
   const saveEdit = () => {
-    if (editText.trim() && onEdit) {
-      onEdit(editText.trim());
-    }
+    if (editText.trim() && onEdit) onEdit(editText.trim());
     setIsEditing(false);
   };
 
@@ -107,43 +105,38 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
       <div
         className={cn(
           'w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-0.5',
-          isUser ? 'bg-indigo-600' : 'bg-white border-2 border-indigo-200'
+          isUser ? 'bg-indigo-600' : 'bg-white dark:bg-gray-700 border-2 border-indigo-200 dark:border-indigo-700'
         )}
       >
         {isUser ? (
           <User className="w-4 h-4 text-white" />
         ) : (
-          <Bot className="w-4 h-4 text-indigo-600" />
+          <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
         )}
       </div>
 
       {/* Content */}
       <div className={cn('flex-1 min-w-0', isUser ? 'items-end flex flex-col' : '')}>
         {/* Role label */}
-        <div
-          className={cn(
-            'flex items-center gap-2 mb-1',
-            isUser ? 'flex-row-reverse' : 'flex-row'
-          )}
-        >
-          <span className="text-xs font-semibold text-gray-500">
+        <div className={cn('flex items-center gap-2 mb-1', isUser ? 'flex-row-reverse' : 'flex-row')}>
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
             {isUser ? 'You' : 'GroqChat'}
           </span>
           {model && !isUser && (
-            <span className="text-xs text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-full">
+            <span className="text-xs text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded-full">
               {model.name}
             </span>
           )}
-          <span className="text-xs text-gray-300">{formatDate(message.timestamp)}</span>
+          <span className="text-xs text-gray-300 dark:text-gray-600">{formatDate(message.timestamp)}</span>
         </div>
 
-        {/* Images (user uploaded) */}
+        {/* Images */}
         {message.images && message.images.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2 justify-end">
             {message.images.map((img, i) => (
               <div
                 key={i}
-                className="relative w-40 h-40 rounded-xl overflow-hidden border border-gray-200 shadow-sm"
+                className="relative w-40 h-40 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-600 shadow-sm"
               >
                 <img src={img} alt={`Upload ${i + 1}`} className="w-full h-full object-cover" />
               </div>
@@ -158,19 +151,16 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  saveEdit();
-                }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
                 if (e.key === 'Escape') cancelEdit();
               }}
-              className="w-full rounded-xl border border-indigo-300 bg-white px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400 min-h-[80px]"
+              className="w-full rounded-xl border border-indigo-300 dark:border-indigo-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-800 dark:text-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400 min-h-[80px]"
               autoFocus
             />
             <div className="flex gap-2 mt-2 justify-end">
               <button
                 onClick={cancelEdit}
-                className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
               >
                 Cancel
               </button>
@@ -189,23 +179,14 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
               'rounded-2xl px-4 py-3 max-w-[85%]',
               isUser
                 ? 'bg-indigo-600 text-white rounded-tr-sm'
-                : 'bg-white border border-gray-200 shadow-sm text-gray-800 rounded-tl-sm'
+                : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-gray-800 dark:text-gray-200 rounded-tl-sm'
             )}
           >
             {message.isStreaming && !getTextContent() ? (
               <div className="flex gap-1 py-1">
-                <span
-                  className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot"
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot"
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot"
-                  style={{ animationDelay: '300ms' }}
-                />
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse-dot" style={{ animationDelay: '300ms' }} />
               </div>
             ) : isUser ? (
               <p className="text-sm whitespace-pre-wrap leading-relaxed text-white">
@@ -228,7 +209,7 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
                       }
                       return (
                         <code
-                          className="bg-gray-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-mono"
+                          className="bg-gray-100 dark:bg-gray-700 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded text-xs font-mono"
                           {...props}
                         >
                           {children}
@@ -244,13 +225,11 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
           </div>
         )}
 
-        {/* Token info (assistant only) */}
+        {/* Token info */}
         {!isUser && !message.isStreaming && message.tokens && (
-          <span className="text-xs text-gray-300 mt-1 block">
+          <span className="text-xs text-gray-300 dark:text-gray-600 mt-1 block">
             {message.tokens.completion} tokens
-            {message.tokens.totalTime !== undefined
-              ? ` · ${message.tokens.totalTime.toFixed(2)}s`
-              : ''}
+            {message.tokens.totalTime !== undefined ? ` · ${message.tokens.totalTime.toFixed(2)}s` : ''}
           </span>
         )}
 
@@ -266,18 +245,14 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
               <>
                 <button
                   onClick={handleCopy}
-                  className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                   title="Copy"
                 >
-                  {copied ? (
-                    <Check className="w-3 h-3 text-green-500" />
-                  ) : (
-                    <Copy className="w-3 h-3" />
-                  )}
+                  {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                 </button>
                 <button
                   onClick={handleSpeak}
-                  className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                   title="Read aloud"
                 >
                   <Volume2 className="w-3 h-3" />
@@ -285,7 +260,7 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
                 {onRegenerate && (
                   <button
                     onClick={onRegenerate}
-                    className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                     title="Regenerate"
                   >
                     <RotateCcw className="w-3 h-3" />
@@ -296,7 +271,7 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
             {isUser && onEdit && (
               <button
                 onClick={startEdit}
-                className="p-1 hover:bg-indigo-100 rounded text-indigo-300 hover:text-indigo-600 transition-colors"
+                className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded text-indigo-300 hover:text-indigo-600 transition-colors"
                 title="Edit message"
               >
                 <Pencil className="w-3 h-3" />

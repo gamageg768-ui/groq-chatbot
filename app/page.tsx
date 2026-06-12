@@ -7,9 +7,37 @@ import MessageBubble from '@/components/MessageBubble';
 import ChatInput from '@/components/ChatInput';
 import SettingsModal from '@/components/SettingsModal';
 import WelcomeScreen from '@/components/WelcomeScreen';
-import { Conversation, ConversationTag, Message, MessageContent, AppSettings, Role } from '@/types';
-import { DEFAULT_SETTINGS, generateTitle, getModelById, GROQ_MODELS } from '@/lib/utils';
-import { Menu, X, ChevronDown, Cpu } from 'lucide-react';
+import {
+  Conversation,
+  ConversationTag,
+  Message,
+  MessageContent,
+  AppSettings,
+  Role,
+} from '@/types';
+import {
+  DEFAULT_SETTINGS,
+  generateTitle,
+  getModelById,
+  GROQ_MODELS,
+  getContextUsagePercent,
+  exportConversation,
+  copyConversationToClipboard,
+  getMessageText,
+} from '@/lib/utils';
+import {
+  Menu,
+  X,
+  ChevronDown,
+  Cpu,
+  Moon,
+  Sun,
+  Copy,
+  Check,
+  Download,
+  Sparkles,
+  Loader2,
+} from 'lucide-react';
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -19,6 +47,11 @@ export default function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [copiedConv, setCopiedConv] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
+  const [summarizing, setSummarizing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -48,12 +81,22 @@ export default function ChatPage() {
     localStorage.setItem('groqchat_settings', JSON.stringify(settings));
   }, [settings]);
 
+  // Sync dark mode class on <html>
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', settings.darkMode);
+  }, [settings.darkMode]);
+
   // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversations, activeId]);
 
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
+  const currentModel = getModelById(settings.model);
+  const contextPercent =
+    activeConv && currentModel
+      ? getContextUsagePercent(activeConv, currentModel.contextWindow)
+      : 0;
 
   const createConversation = useCallback(() => {
     const id = uuidv4();
@@ -90,6 +133,52 @@ export default function ChatPage() {
     );
   };
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key === 'k') { e.preventDefault(); createConversation(); }
+      if (mod && e.key === ',') { e.preventDefault(); setShowSettings(true); }
+      if (e.key === 'Escape' && isStreaming) stopStreaming();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [createConversation, isStreaming]);
+
+  // Helper: read stream and return accumulated text (non-state)
+  const fetchCompletion = async (
+    messages: { role: Role; content: string }[],
+    systemPrompt: string
+  ): Promise<string> => {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.3,
+        max_tokens: 512,
+        systemPrompt,
+      }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let result = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of decoder.decode(value, { stream: true }).split('\n').filter((l) => l.trim())) {
+        if (line.startsWith('data: ')) {
+          const d = line.slice(6);
+          if (d === '[DONE]' || d.startsWith('[USAGE]')) continue;
+          try { result += JSON.parse(d).choices?.[0]?.delta?.content || ''; } catch {}
+        }
+      }
+    }
+    return result;
+  };
+
   const executeAPICall = async (
     convId: string,
     apiMessages: { role: Role; content: string | MessageContent[] }[],
@@ -109,6 +198,7 @@ export default function ChatPage() {
           temperature: settings.temperature,
           max_tokens: settings.maxTokens,
           systemPrompt: settings.systemPrompt,
+          language: settings.language,
         }),
       });
 
@@ -123,9 +213,7 @@ export default function ChatPage() {
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n').filter((l) => l.trim());
-
-        for (const line of lines) {
+        for (const line of chunk.split('\n').filter((l) => l.trim())) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') break;
@@ -158,8 +246,7 @@ export default function ChatPage() {
               continue;
             }
             try {
-              const parsed = JSON.parse(data);
-              const delta = parsed.choices?.[0]?.delta?.content || '';
+              const delta = JSON.parse(data).choices?.[0]?.delta?.content || '';
               if (delta) {
                 accumulated += delta;
                 setConversations((prev) =>
@@ -180,19 +267,36 @@ export default function ChatPage() {
         }
       }
 
-      // Mark streaming done
       setConversations((prev) =>
         prev.map((c) =>
           c.id === convId
-            ? {
-                ...c,
-                messages: c.messages.map((m) =>
-                  m.id === assistantMsgId ? { ...m, isStreaming: false } : m
-                ),
-              }
+            ? { ...c, messages: c.messages.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)) }
             : c
         )
       );
+
+      // Auto-generate title on first exchange
+      if (apiMessages.length === 1 && accumulated) {
+        const userText =
+          typeof apiMessages[0].content === 'string'
+            ? apiMessages[0].content
+            : (apiMessages[0].content as MessageContent[])
+                .filter((c) => c.type === 'text')
+                .map((c) => c.text || '')
+                .join('');
+        if (userText) {
+          fetch('/api/title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userMessage: userText.slice(0, 300), assistantMessage: accumulated.slice(0, 300) }),
+          })
+            .then((r) => (r.ok ? r.json() : { title: '' }))
+            .then(({ title }) => {
+              if (title) setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, title } : c)));
+            })
+            .catch(() => {});
+        }
+      }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setConversations((prev) =>
@@ -202,12 +306,7 @@ export default function ChatPage() {
                   ...c,
                   messages: c.messages.map((m) =>
                     m.id === assistantMsgId
-                      ? {
-                          ...m,
-                          content:
-                            '⚠️ Error: Could not get a response. Check your API key and try again.',
-                          isStreaming: false,
-                        }
+                      ? { ...m, content: '⚠️ Error: Could not get a response. Check your API key and try again.', isStreaming: false }
                       : m
                   ),
                 }
@@ -243,22 +342,13 @@ export default function ChatPage() {
     if (images && images.length > 0) {
       userContent = [
         { type: 'text', text } as MessageContent,
-        ...images.map(
-          (url) => ({ type: 'image_url' as const, image_url: { url } } as MessageContent)
-        ),
+        ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } } as MessageContent)),
       ];
     } else {
       userContent = text;
     }
 
-    const userMsg: Message = {
-      id: uuidv4(),
-      role: 'user',
-      content: userContent,
-      timestamp: new Date(),
-      images,
-    };
-
+    const userMsg: Message = { id: uuidv4(), role: 'user', content: userContent, timestamp: new Date(), images };
     const assistantMsg: Message = {
       id: uuidv4(),
       role: 'assistant',
@@ -282,29 +372,18 @@ export default function ChatPage() {
     );
 
     const conv = conversations.find((c) => c.id === convId) ?? { messages: [] as Message[] };
-    const apiMessages = [...conv.messages, userMsg].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-
+    const apiMessages = [...conv.messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
     await executeAPICall(convId, apiMessages, assistantMsg.id);
   };
 
   const handleEdit = async (msgId: string, newText: string) => {
     if (!activeId || isStreaming) return;
-
     const conv = conversations.find((c) => c.id === activeId);
     if (!conv) return;
-
     const msgIndex = conv.messages.findIndex((m) => m.id === msgId);
     if (msgIndex === -1) return;
 
-    const updatedMsg: Message = {
-      ...conv.messages[msgIndex],
-      content: newText,
-      images: undefined,
-    };
-
+    const updatedMsg: Message = { ...conv.messages[msgIndex], content: newText, images: undefined };
     const assistantMsg: Message = {
       id: uuidv4(),
       role: 'assistant',
@@ -313,27 +392,18 @@ export default function ChatPage() {
       model: settings.model,
       isStreaming: true,
     };
-
     const messagesUpToEdit = [...conv.messages.slice(0, msgIndex), updatedMsg];
 
     setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeId
-          ? { ...c, messages: [...messagesUpToEdit, assistantMsg], updatedAt: new Date() }
-          : c
-      )
+      prev.map((c) => (c.id === activeId ? { ...c, messages: [...messagesUpToEdit, assistantMsg], updatedAt: new Date() } : c))
     );
-
-    const apiMessages = messagesUpToEdit.map((m) => ({ role: m.role, content: m.content }));
-    await executeAPICall(activeId, apiMessages, assistantMsg.id);
+    await executeAPICall(activeId, messagesUpToEdit.map((m) => ({ role: m.role, content: m.content })), assistantMsg.id);
   };
 
   const handleRegenerate = async (msgId: string) => {
     if (!activeId || isStreaming) return;
-
     const conv = conversations.find((c) => c.id === activeId);
     if (!conv) return;
-
     const msgIndex = conv.messages.findIndex((m) => m.id === msgId);
     if (msgIndex === -1) return;
 
@@ -345,44 +415,55 @@ export default function ChatPage() {
       model: settings.model,
       isStreaming: true,
     };
-
     const messagesBefore = conv.messages.slice(0, msgIndex);
 
     setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeId
-          ? { ...c, messages: [...messagesBefore, assistantMsg], updatedAt: new Date() }
-          : c
-      )
+      prev.map((c) => (c.id === activeId ? { ...c, messages: [...messagesBefore, assistantMsg], updatedAt: new Date() } : c))
     );
-
-    const apiMessages = messagesBefore.map((m) => ({ role: m.role, content: m.content }));
-    await executeAPICall(activeId, apiMessages, assistantMsg.id);
+    await executeAPICall(activeId, messagesBefore.map((m) => ({ role: m.role, content: m.content })), assistantMsg.id);
   };
 
-  const stopStreaming = () => {
+  const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort();
     setIsStreaming(false);
     setConversations((prev) =>
       prev.map((c) => ({
         ...c,
-        messages: c.messages.map((m) =>
-          m.isStreaming ? { ...m, isStreaming: false } : m
-        ),
+        messages: c.messages.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
       }))
     );
+  }, []);
+
+  const handleCopyConversation = async () => {
+    if (!activeConv) return;
+    await copyConversationToClipboard(activeConv);
+    setCopiedConv(true);
+    setTimeout(() => setCopiedConv(false), 2000);
   };
 
-  const currentModel = getModelById(settings.model);
+  const handleSummarize = async () => {
+    if (!activeConv || summarizing) return;
+    setSummarizing(true);
+    setShowSummary(true);
+    setSummaryText('');
+    try {
+      const msgs = activeConv.messages.map((m) => ({ role: m.role as Role, content: getMessageText(m) }));
+      const summary = await fetchCompletion(
+        msgs,
+        'Summarize this conversation in 5-7 concise bullet points. Focus on key topics, decisions, and outcomes.'
+      );
+      setSummaryText(summary || 'No summary available.');
+    } catch {
+      setSummaryText('Failed to generate summary.');
+    }
+    setSummarizing(false);
+  };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
+    <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-900">
       {/* Mobile overlay */}
       {mobileSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/30 z-20 md:hidden"
-          onClick={() => setMobileSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setMobileSidebarOpen(false)} />
       )}
 
       {/* Sidebar */}
@@ -395,110 +476,162 @@ export default function ChatPage() {
           conversations={conversations}
           activeId={activeId}
           onNew={createConversation}
-          onSelect={(id) => {
-            setActiveId(id);
-            setMobileSidebarOpen(false);
-          }}
+          onSelect={(id) => { setActiveId(id); setMobileSidebarOpen(false); }}
           onDelete={deleteConversation}
           onPin={pinConversation}
           onTag={tagConversation}
-          onSettings={() => {
-            setShowSettings(true);
-            setMobileSidebarOpen(false);
-          }}
+          onSettings={() => { setShowSettings(true); setMobileSidebarOpen(false); }}
         />
       </div>
 
-      {/* Main chat area */}
+      {/* Main */}
       <main className="flex flex-col flex-1 min-w-0 h-full">
-        {/* Top bar */}
-        <header className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200 shrink-0">
-          <div className="flex items-center gap-3">
+        {/* Header */}
+        <header className="flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-              className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 md:hidden transition-colors"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 md:hidden transition-colors"
             >
               {mobileSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
-
-            {activeConv ? (
-              <h1 className="text-base font-semibold text-gray-800 truncate max-w-[200px] md:max-w-xs">
-                {activeConv.title}
-              </h1>
-            ) : (
-              <h1 className="text-base font-semibold text-gray-800">New Chat</h1>
+            <h1 className="text-base font-semibold text-gray-800 dark:text-gray-100 truncate max-w-[150px] md:max-w-xs">
+              {activeConv?.title ?? 'New Chat'}
+            </h1>
+            {/* Context warning */}
+            {contextPercent >= 70 && (
+              <span
+                className={`hidden sm:inline text-xs px-2 py-0.5 rounded-full font-medium ${
+                  contextPercent >= 90
+                    ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                    : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                }`}
+              >
+                {contextPercent}% ctx
+              </span>
             )}
           </div>
 
-          {/* Model picker */}
-          <div className="relative">
-            <button
-              onClick={() => setShowModelPicker(!showModelPicker)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-indigo-700 bg-gray-100 hover:bg-indigo-50 rounded-xl border border-gray-200 hover:border-indigo-200 transition-all"
-            >
-              <Cpu className="w-3.5 h-3.5 text-indigo-500" />
-              <span className="hidden sm:block">{currentModel?.name ?? settings.model}</span>
-              <ChevronDown className="w-3 h-3" />
-            </button>
-
-            {showModelPicker && (
+          <div className="flex items-center gap-1">
+            {/* Conversation actions */}
+            {activeConv && activeConv.messages.length > 0 && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowModelPicker(false)} />
-                <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-2xl border border-gray-200 shadow-xl z-20 overflow-hidden">
-                  <p className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-100">
-                    Select Model
-                  </p>
-                  <div className="max-h-80 overflow-y-auto scrollbar-thin">
-                    {GROQ_MODELS.map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => {
-                          setSettings((p) => ({ ...p, model: model.id }));
-                          setShowModelPicker(false);
-                        }}
-                        className={`w-full text-left px-4 py-3 hover:bg-indigo-50 transition-colors flex items-start justify-between gap-2 ${
-                          settings.model === model.id ? 'bg-indigo-50' : ''
-                        }`}
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-gray-900">{model.name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{model.description}</p>
-                        </div>
-                        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
-                          {model.badge}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                {/* Summarize */}
+                <button
+                  onClick={handleSummarize}
+                  disabled={summarizing || isStreaming}
+                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+                  title="Summarize conversation (AI)"
+                >
+                  <Sparkles className="w-4 h-4" />
+                </button>
+
+                {/* Copy */}
+                <button
+                  onClick={handleCopyConversation}
+                  className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                  title="Copy conversation"
+                >
+                  {copiedConv ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                </button>
+
+                {/* Export dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowExportMenu((s) => !s)}
+                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                    title="Export conversation"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  {showExportMenu && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-20 overflow-hidden w-36">
+                        {(['md', 'txt', 'json'] as const).map((fmt) => (
+                          <button
+                            key={fmt}
+                            onClick={() => {
+                              exportConversation(activeConv, fmt);
+                              setShowExportMenu(false);
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors"
+                          >
+                            Export .{fmt}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}
+
+            {/* Dark mode toggle */}
+            <button
+              onClick={() => setSettings((p) => ({ ...p, darkMode: !p.darkMode }))}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 transition-colors"
+              title={settings.darkMode ? 'Light mode' : 'Dark mode'}
+            >
+              {settings.darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
+            {/* Model picker */}
+            <div className="relative ml-1">
+              <button
+                onClick={() => setShowModelPicker(!showModelPicker)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:text-indigo-700 dark:hover:text-indigo-400 bg-gray-100 dark:bg-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-xl border border-gray-200 dark:border-gray-600 hover:border-indigo-200 transition-all"
+              >
+                <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+                <span className="hidden sm:block">{currentModel?.name ?? settings.model}</span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+
+              {showModelPicker && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowModelPicker(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-xl z-20 overflow-hidden">
+                    <p className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
+                      Select Model
+                    </p>
+                    <div className="max-h-80 overflow-y-auto scrollbar-thin">
+                      {GROQ_MODELS.map((model) => (
+                        <button
+                          key={model.id}
+                          onClick={() => { setSettings((p) => ({ ...p, model: model.id })); setShowModelPicker(false); }}
+                          className={`w-full text-left px-4 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-colors flex items-start justify-between gap-2 ${
+                            settings.model === model.id ? 'bg-indigo-50 dark:bg-indigo-900/30' : ''
+                          }`}
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{model.name}</p>
+                            <p className="text-xs text-gray-400 mt-0.5">{model.description}</p>
+                          </div>
+                          <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-1.5 py-0.5 rounded-full whitespace-nowrap shrink-0">
+                            {model.badge}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto scrollbar-thin">
           {!activeConv || activeConv.messages.length === 0 ? (
-            <WelcomeScreen
-              onPrompt={(p) => handleSend(p)}
-              modelName={currentModel?.name ?? 'Groq AI'}
-            />
+            <WelcomeScreen onPrompt={(p) => handleSend(p)} modelName={currentModel?.name ?? 'Groq AI'} />
           ) : (
             <div className="max-w-3xl mx-auto py-4">
               {activeConv.messages.map((msg) => (
                 <MessageBubble
                   key={msg.id}
                   message={msg}
-                  onEdit={
-                    msg.role === 'user' && !isStreaming
-                      ? (newText) => handleEdit(msg.id, newText)
-                      : undefined
-                  }
-                  onRegenerate={
-                    msg.role === 'assistant' && !msg.isStreaming && !isStreaming
-                      ? () => handleRegenerate(msg.id)
-                      : undefined
-                  }
+                  onEdit={msg.role === 'user' && !isStreaming ? (t) => handleEdit(msg.id, t) : undefined}
+                  onRegenerate={msg.role === 'assistant' && !msg.isStreaming && !isStreaming ? () => handleRegenerate(msg.id) : undefined}
                 />
               ))}
               <div ref={messagesEndRef} />
@@ -507,7 +640,7 @@ export default function ChatPage() {
         </div>
 
         {/* Input */}
-        <div className="bg-white border-t border-gray-200 shrink-0">
+        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 shrink-0">
           <div className="max-w-3xl mx-auto">
             <ChatInput
               onSend={handleSend}
@@ -522,11 +655,39 @@ export default function ChatPage() {
 
       {/* Settings modal */}
       {showSettings && (
-        <SettingsModal
-          settings={settings}
-          onSave={setSettings}
-          onClose={() => setShowSettings(false)}
-        />
+        <SettingsModal settings={settings} onSave={setSettings} onClose={() => setShowSettings(false)} />
+      )}
+
+      {/* Summary modal */}
+      {showSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-gray-200 dark:border-gray-700 animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 text-sm">
+                <Sparkles className="w-4 h-4 text-indigo-500" />
+                Conversation Summary
+              </h3>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 max-h-80 overflow-y-auto scrollbar-thin">
+              {summarizing ? (
+                <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">Generating summary...</span>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  {summaryText}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

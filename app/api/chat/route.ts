@@ -5,16 +5,17 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, model, temperature, max_tokens, systemPrompt } = await req.json();
+    const { messages, model, temperature, max_tokens, systemPrompt, language } = await req.json();
 
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ error: 'GROQ_API_KEY is not configured' }, { status: 500 });
     }
 
-    const systemMessage = systemPrompt
-      ? [{ role: 'system', content: systemPrompt }]
-      : [{ role: 'system', content: 'You are a helpful, harmless, and honest AI assistant.' }];
+    const basePrompt =
+      systemPrompt || 'You are a helpful, harmless, and honest AI assistant.';
+    const languageSuffix = language ? `\n\nAlways respond in ${language}.` : '';
+    const systemMessage = [{ role: 'system', content: basePrompt + languageSuffix }];
 
     const groqMessages = [...systemMessage, ...messages];
 
