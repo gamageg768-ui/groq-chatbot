@@ -8,11 +8,11 @@ export function cn(...inputs: ClassValue[]) {
 
 export const GROQ_MODELS: GroqModel[] = [
   {
-    id: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    name: 'Llama 4 Scout',
+    id: 'qwen/qwen3.8-27b',
+    name: 'Qwen 3.8 27B',
     contextWindow: 131072,
     supportsVision: true,
-    description: 'Meta Llama 4 Scout — vision + text, 128K ctx',
+    description: 'Qwen 3.8 27B — vision + text, 128K ctx, thinking mode',
     badge: '👁️ Vision',
   },
   {
@@ -24,16 +24,16 @@ export const GROQ_MODELS: GroqModel[] = [
     badge: '🔥 Fast',
   },
   {
-    id: 'llama-3.3-70b-versatile',
-    name: 'Llama 3.3 70B',
+    id: 'openai/gpt-oss-120b',
+    name: 'GPT OSS 120B',
     contextWindow: 128000,
     supportsVision: false,
     description: 'Most capable text model, great for complex tasks',
     badge: '⚡ Smart',
   },
   {
-    id: 'llama-3.1-8b-instant',
-    name: 'Llama 3.1 8B',
+    id: 'openai/gpt-oss-20b',
+    name: 'GPT OSS 20B',
     contextWindow: 128000,
     supportsVision: false,
     description: 'Ultra-fast, great for quick responses',
@@ -160,7 +160,7 @@ export async function copyConversationToClipboard(conv: Conversation): Promise<v
 }
 
 export const DEFAULT_SETTINGS = {
-  model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  model: 'meta-llama/llama-4-maverick-17b-128e-instruct',
   temperature: 0.7,
   maxTokens: 2048,
   systemPrompt:
