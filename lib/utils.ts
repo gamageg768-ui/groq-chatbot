@@ -47,14 +47,6 @@ export const GROQ_MODELS: GroqModel[] = [
     description: "Google's Gemma 2 instruction-tuned",
     badge: '💎 Google',
   },
-  {
-    id: 'mixtral-8x7b-32768',
-    name: 'Mixtral 8x7B',
-    contextWindow: 32768,
-    supportsVision: false,
-    description: 'Mixture of experts, balanced performance',
-    badge: '🎯 Balanced',
-  },
 ];
 
 export function getModelById(id: string): GroqModel | undefined {

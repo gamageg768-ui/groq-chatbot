@@ -5,20 +5,26 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { Copy, Check, Bot, User, Volume2, Pencil, RotateCcw } from 'lucide-react';
+import { Copy, Check, Bot, User, Volume2, VolumeX, Pencil, RotateCcw, GitFork, Eye } from 'lucide-react';
 import { Message } from '@/types';
 import { cn, formatDate, getModelById } from '@/lib/utils';
+import ArtifactRenderer from './ArtifactRenderer';
 
 interface MessageBubbleProps {
   message: Message;
   onEdit?: (newText: string) => void;
   onRegenerate?: () => void;
+  onFork?: () => void;
 }
+
+const PREVIEWABLE = new Set(['html', 'svg', 'css']);
 
 function CodeBlock({ children, className }: { children: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
   const match = /language-(\w+)/.exec(className || '');
   const language = match ? match[1] : 'text';
+  const canPreview = PREVIEWABLE.has(language);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(children);
@@ -27,39 +33,61 @@ function CodeBlock({ children, className }: { children: string; className?: stri
   };
 
   return (
-    <div className="relative my-3 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-600 shadow-sm">
-      <div className="flex items-center justify-between bg-gray-800 dark:bg-gray-900 px-4 py-2">
-        <span className="text-xs text-gray-400 font-mono font-medium">{language}</span>
-        <button
-          onClick={handleCopy}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+    <>
+      <div className="relative my-3 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-600 shadow-sm">
+        <div className="flex items-center justify-between bg-gray-800 dark:bg-gray-900 px-4 py-2">
+          <span className="text-xs text-gray-400 font-mono font-medium">{language}</span>
+          <div className="flex items-center gap-2">
+            {canPreview && (
+              <button
+                onClick={() => setShowPreview(true)}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-400 transition-colors"
+              >
+                <Eye className="w-3 h-3" />
+                <span>Preview</span>
+              </button>
+            )}
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+              <span>{copied ? 'Copied!' : 'Copy'}</span>
+            </button>
+          </div>
+        </div>
+        <SyntaxHighlighter
+          language={language}
+          style={oneLight}
+          customStyle={{
+            margin: 0,
+            borderRadius: 0,
+            fontSize: '0.8rem',
+            background: '#1f2937',
+            color: '#e5e7eb',
+          }}
+          codeTagProps={{ style: { color: '#e5e7eb' } }}
         >
-          {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
-          <span>{copied ? 'Copied!' : 'Copy'}</span>
-        </button>
+          {children}
+        </SyntaxHighlighter>
       </div>
-      <SyntaxHighlighter
-        language={language}
-        style={oneLight}
-        customStyle={{
-          margin: 0,
-          borderRadius: 0,
-          fontSize: '0.8rem',
-          background: '#1f2937',
-          color: '#e5e7eb',
-        }}
-        codeTagProps={{ style: { color: '#e5e7eb' } }}
-      >
-        {children}
-      </SyntaxHighlighter>
-    </div>
+
+      {showPreview && (
+        <ArtifactRenderer
+          code={children}
+          language={language}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
+    </>
   );
 }
 
-export default function MessageBubble({ message, onEdit, onRegenerate }: MessageBubbleProps) {
+export default function MessageBubble({ message, onEdit, onRegenerate, onFork }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const isUser = message.role === 'user';
   const model = message.model ? getModelById(message.model) : null;
 
@@ -78,8 +106,17 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
   };
 
   const handleSpeak = () => {
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
     const utterance = new SpeechSynthesisUtterance(getTextContent());
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
   };
 
   const startEdit = () => {
@@ -252,10 +289,15 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
                 </button>
                 <button
                   onClick={handleSpeak}
-                  className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                  title="Read aloud"
+                  className={cn(
+                    'p-1 rounded transition-colors',
+                    isSpeaking
+                      ? 'text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
+                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                  )}
+                  title={isSpeaking ? 'Stop reading' : 'Read aloud'}
                 >
-                  <Volume2 className="w-3 h-3" />
+                  {isSpeaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                 </button>
                 {onRegenerate && (
                   <button
@@ -268,14 +310,27 @@ export default function MessageBubble({ message, onEdit, onRegenerate }: Message
                 )}
               </>
             )}
-            {isUser && onEdit && (
-              <button
-                onClick={startEdit}
-                className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded text-indigo-300 hover:text-indigo-600 transition-colors"
-                title="Edit message"
-              >
-                <Pencil className="w-3 h-3" />
-              </button>
+            {isUser && (
+              <>
+                {onEdit && (
+                  <button
+                    onClick={startEdit}
+                    className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded text-indigo-300 hover:text-indigo-600 transition-colors"
+                    title="Edit message"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                )}
+                {onFork && (
+                  <button
+                    onClick={onFork}
+                    className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 rounded text-indigo-300 hover:text-indigo-500 transition-colors"
+                    title="Fork conversation from here"
+                  >
+                    <GitFork className="w-3 h-3" />
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}

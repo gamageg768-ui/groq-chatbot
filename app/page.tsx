@@ -37,7 +37,12 @@ import {
   Download,
   Sparkles,
   Loader2,
+  Columns2,
+  FlaskConical,
 } from 'lucide-react';
+import AnalyticsDashboard from '@/components/AnalyticsDashboard';
+import CompareModal from '@/components/CompareModal';
+import ABTestModal from '@/components/ABTestModal';
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -52,6 +57,9 @@ export default function ChatPage() {
   const [showSummary, setShowSummary] = useState(false);
   const [summaryText, setSummaryText] = useState('');
   const [summarizing, setSummarizing] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
+  const [showABTest, setShowABTest] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -150,6 +158,7 @@ export default function ChatPage() {
     messages: { role: Role; content: string }[],
     systemPrompt: string
   ): Promise<string> => {
+    const apiKeyOverride = sessionStorage.getItem('groq_api_key_override') || undefined;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,6 +168,7 @@ export default function ChatPage() {
         temperature: 0.3,
         max_tokens: 512,
         systemPrompt,
+        apiKeyOverride,
       }),
     });
     if (!res.ok) throw new Error('Failed');
@@ -188,6 +198,7 @@ export default function ChatPage() {
     abortControllerRef.current = new AbortController();
 
     try {
+      const apiKeyOverride = sessionStorage.getItem('groq_api_key_override') || undefined;
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -199,81 +210,101 @@ export default function ChatPage() {
           max_tokens: settings.maxTokens,
           systemPrompt: settings.systemPrompt,
           language: settings.language,
+          apiKeyOverride,
+          streamingEnabled: settings.streamingEnabled,
         }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
       let accumulated = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      if (!settings.streamingEnabled) {
+        const data = await res.json();
+        accumulated = data.content || '';
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId
+              ? {
+                  ...c,
+                  messages: c.messages.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: accumulated, isStreaming: false } : m
+                  ),
+                }
+              : c
+          )
+        );
+      } else {
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
 
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n').filter((l) => l.trim())) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
-            if (data.startsWith('[USAGE] ')) {
-              try {
-                const usage = JSON.parse(data.slice(8));
-                setConversations((prev) =>
-                  prev.map((c) =>
-                    c.id === convId
-                      ? {
-                          ...c,
-                          messages: c.messages.map((m) =>
-                            m.id === assistantMsgId
-                              ? {
-                                  ...m,
-                                  tokens: {
-                                    prompt: usage.prompt_tokens,
-                                    completion: usage.completion_tokens,
-                                    total: usage.total_tokens,
-                                    totalTime: usage.total_time,
-                                  },
-                                }
-                              : m
-                          ),
-                        }
-                      : c
-                  )
-                );
-              } catch {}
-              continue;
-            }
-            try {
-              const delta = JSON.parse(data).choices?.[0]?.delta?.content || '';
-              if (delta) {
-                accumulated += delta;
-                setConversations((prev) =>
-                  prev.map((c) =>
-                    c.id === convId
-                      ? {
-                          ...c,
-                          messages: c.messages.map((m) =>
-                            m.id === assistantMsgId ? { ...m, content: accumulated } : m
-                          ),
-                        }
-                      : c
-                  )
-                );
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split('\n').filter((l) => l.trim())) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') break;
+              if (data.startsWith('[USAGE] ')) {
+                try {
+                  const usage = JSON.parse(data.slice(8));
+                  setConversations((prev) =>
+                    prev.map((c) =>
+                      c.id === convId
+                        ? {
+                            ...c,
+                            messages: c.messages.map((m) =>
+                              m.id === assistantMsgId
+                                ? {
+                                    ...m,
+                                    tokens: {
+                                      prompt: usage.prompt_tokens,
+                                      completion: usage.completion_tokens,
+                                      total: usage.total_tokens,
+                                      totalTime: usage.total_time,
+                                    },
+                                  }
+                                : m
+                            ),
+                          }
+                        : c
+                    )
+                  );
+                } catch {}
+                continue;
               }
-            } catch {}
+              try {
+                const delta = JSON.parse(data).choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  accumulated += delta;
+                  setConversations((prev) =>
+                    prev.map((c) =>
+                      c.id === convId
+                        ? {
+                            ...c,
+                            messages: c.messages.map((m) =>
+                              m.id === assistantMsgId ? { ...m, content: accumulated } : m
+                            ),
+                          }
+                        : c
+                    )
+                  );
+                }
+              } catch {}
+            }
           }
         }
-      }
 
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === convId
-            ? { ...c, messages: c.messages.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)) }
-            : c
-        )
-      );
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === convId
+              ? { ...c, messages: c.messages.map((m) => (m.id === assistantMsgId ? { ...m, isStreaming: false } : m)) }
+              : c
+          )
+        );
+      }
 
       // Auto-generate title on first exchange
       if (apiMessages.length === 1 && accumulated) {
@@ -423,6 +454,27 @@ export default function ChatPage() {
     await executeAPICall(activeId, messagesBefore.map((m) => ({ role: m.role, content: m.content })), assistantMsg.id);
   };
 
+  const handleFork = (msgId: string) => {
+    if (!activeId) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv) return;
+    const msgIndex = conv.messages.findIndex((m) => m.id === msgId);
+    if (msgIndex === -1) return;
+    const forkedMessages = conv.messages.slice(0, msgIndex + 1);
+    const newId = uuidv4();
+    const forkedConv: Conversation = {
+      id: newId,
+      title: `Fork of ${conv.title}`,
+      messages: forkedMessages,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      model: settings.model,
+    };
+    setConversations((prev) => [forkedConv, ...prev]);
+    setActiveId(newId);
+    setMobileSidebarOpen(false);
+  };
+
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort();
     setIsStreaming(false);
@@ -481,6 +533,7 @@ export default function ChatPage() {
           onPin={pinConversation}
           onTag={tagConversation}
           onSettings={() => { setShowSettings(true); setMobileSidebarOpen(false); }}
+          onAnalytics={() => setShowAnalytics(true)}
         />
       </div>
 
@@ -513,6 +566,24 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-1">
+            {/* Compare models */}
+            <button
+              onClick={() => setShowCompare(true)}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+              title="Compare models"
+            >
+              <Columns2 className="w-4 h-4" />
+            </button>
+
+            {/* A/B Test prompts */}
+            <button
+              onClick={() => setShowABTest(true)}
+              className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+              title="A/B test system prompts"
+            >
+              <FlaskConical className="w-4 h-4" />
+            </button>
+
             {/* Conversation actions */}
             {activeConv && activeConv.messages.length > 0 && (
               <>
@@ -632,6 +703,7 @@ export default function ChatPage() {
                   message={msg}
                   onEdit={msg.role === 'user' && !isStreaming ? (t) => handleEdit(msg.id, t) : undefined}
                   onRegenerate={msg.role === 'assistant' && !msg.isStreaming && !isStreaming ? () => handleRegenerate(msg.id) : undefined}
+                  onFork={msg.role === 'user' && !isStreaming ? () => handleFork(msg.id) : undefined}
                 />
               ))}
               <div ref={messagesEndRef} />
@@ -656,6 +728,24 @@ export default function ChatPage() {
       {/* Settings modal */}
       {showSettings && (
         <SettingsModal settings={settings} onSave={setSettings} onClose={() => setShowSettings(false)} />
+      )}
+
+      {/* Analytics modal */}
+      {showAnalytics && (
+        <AnalyticsDashboard
+          conversations={conversations}
+          onClose={() => setShowAnalytics(false)}
+        />
+      )}
+
+      {/* Compare modal */}
+      {showCompare && (
+        <CompareModal settings={settings} onClose={() => setShowCompare(false)} />
+      )}
+
+      {/* A/B Test modal */}
+      {showABTest && (
+        <ABTestModal settings={settings} onClose={() => setShowABTest(false)} />
       )}
 
       {/* Summary modal */}

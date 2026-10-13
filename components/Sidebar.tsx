@@ -12,6 +12,7 @@ import {
   Search,
   Pin,
   Tag,
+  BarChart2,
 } from 'lucide-react';
 import { Conversation, ConversationTag } from '@/types';
 import { cn, formatDate } from '@/lib/utils';
@@ -44,6 +45,7 @@ interface SidebarProps {
   onPin: (id: string) => void;
   onTag: (id: string, tag: ConversationTag | undefined) => void;
   onSettings: () => void;
+  onAnalytics: () => void;
 }
 
 export default function Sidebar({
@@ -55,6 +57,7 @@ export default function Sidebar({
   onPin,
   onTag,
   onSettings,
+  onAnalytics,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -263,13 +266,25 @@ export default function Sidebar({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-3">
+      <div className="border-t border-gray-200 dark:border-gray-700 px-2 py-3 space-y-0.5">
+        <button
+          onClick={onAnalytics}
+          className={cn(
+            'w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-400 transition-colors text-sm',
+            collapsed && 'justify-center px-0'
+          )}
+          title="Token Analytics"
+        >
+          <BarChart2 className="w-4 h-4 shrink-0" />
+          {!collapsed && <span>Analytics</span>}
+        </button>
         <button
           onClick={onSettings}
           className={cn(
             'w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-400 transition-colors text-sm',
             collapsed && 'justify-center px-0'
           )}
+          title="Settings"
         >
           <Settings className="w-4 h-4 shrink-0" />
           {!collapsed && <span>Settings</span>}

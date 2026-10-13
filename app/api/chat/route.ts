@@ -5,10 +5,11 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, model, temperature, max_tokens, systemPrompt, language } = await req.json();
+    const { messages, model, temperature, max_tokens, systemPrompt, language, apiKeyOverride, streamingEnabled } = await req.json();
 
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
+    const effectiveKey = apiKeyOverride || apiKey;
+    if (!effectiveKey) {
       return NextResponse.json({ error: 'GROQ_API_KEY is not configured' }, { status: 500 });
     }
 
@@ -19,10 +20,12 @@ export async function POST(req: NextRequest) {
 
     const groqMessages = [...systemMessage, ...messages];
 
+    const shouldStream = streamingEnabled !== false;
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -30,7 +33,7 @@ export async function POST(req: NextRequest) {
         messages: groqMessages,
         temperature: temperature ?? 0.7,
         max_tokens: max_tokens ?? 2048,
-        stream: true,
+        stream: shouldStream,
       }),
     });
 
@@ -41,6 +44,14 @@ export async function POST(req: NextRequest) {
         { error: `Groq API error: ${response.statusText}` },
         { status: response.status }
       );
+    }
+
+    if (!shouldStream) {
+      const data = await response.json();
+      return NextResponse.json({
+        content: data.choices?.[0]?.message?.content || '',
+        usage: data.usage,
+      });
     }
 
     const encoder = new TextEncoder();

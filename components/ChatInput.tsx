@@ -110,7 +110,21 @@ export default function ChatInput({
     async (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
-      await addImages(Array.from(e.dataTransfer.files));
+      const files = Array.from(e.dataTransfer.files);
+      const imageFiles = files.filter((f) => f.type.startsWith('image/'));
+      const textFiles = files.filter((f) => !f.type.startsWith('image/'));
+      if (imageFiles.length) await addImages(imageFiles);
+      if (textFiles.length) {
+        try {
+          const file = textFiles[0];
+          const content = await fileToText(file);
+          const truncated = content.length > 8000 ? content.slice(0, 8000) + '\n\n[Content truncated...]' : content;
+          const injection = `[File: ${file.name}]\n\n${truncated}`;
+          setText((prev) => (prev ? prev + '\n\n' + injection : injection));
+          setTimeout(resizeTextarea, 0);
+          textareaRef.current?.focus();
+        } catch {}
+      }
     },
     [images]
   );
